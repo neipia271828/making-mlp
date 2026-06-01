@@ -14,10 +14,13 @@ class CNN(nn.Module):
         )
         self.classifier = nn.Sequential(
             nn.Flatten(),
+            nn.Dropout(0.3),
             nn.Linear(64 * 7 * 7, 128),
             nn.ReLU(),
+            nn.Dropout(0.3),
             nn.Linear(128, 128),
             nn.ReLU(),
+            nn.Dropout(0.3),
             nn.Linear(128, 10)
         )
     
