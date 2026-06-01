@@ -6,7 +6,23 @@ from torchvision import datasets, transforms
 import time
 from datetime import datetime
 from pathlib import Path
+import subprocess
 import csv
+
+staging = subprocess.run(
+    ["git", "add", "."],
+    check=True,
+).stdout.strip()
+
+commit = subprocess.run(
+    ["git", "commit", "-m", '"SYSTEM EXECUTION : backup commit"'],
+    check=True
+).stdout.strip()
+
+commit_hash = subprocess.check_output(
+      ["git", "rev-parse", "HEAD"],
+      text=True
+  ).strip()
 
 def get_device() -> torch.device:
     if torch.backends.mps.is_available():
@@ -173,6 +189,9 @@ def main() -> None:
     model_path = model_dir / "model.pt"
 
     torch.save(model.state_dict(), model_path)
+
+    with open("model.txt", "w", encoding="utf-8") as f:
+        f.write(f"{commit_hash}")
 
     import matplotlib.pyplot as plt
     csv_path = Path(".") / f"data/{PROJECT}/logs/{PROJECT}.csv"
