@@ -69,11 +69,48 @@ valid_loader = DataLoader(
 - `num_workers`: データ準備を並列化する
 - `pin_memory`: CPU から GPU への転送を効率化しやすい
 
-ただし、`mps` 環境では `pin_memory=True` の効果は `cuda` ほど大きくないことがある。
+ただし、`mps` 環境では `pin_memory=True` は現状サポートされておらず、警告が出ることがある。
+
+そのため、`pin_memory` は `cuda` のときだけ有効にする方が安全。
+
+```python
+use_cuda = device.type == "cuda"
+
+train_loader = DataLoader(
+    train_ds,
+    batch_size=128,
+    shuffle=True,
+    num_workers=2,
+    pin_memory=use_cuda,
+)
+```
 
 また、データセットが小さい場合は `num_workers` を増やしすぎるとかえって遅くなることもある。
 
 最初は `0`, `2`, `4` を試し、速いものを選ぶのが実務的。
+
+また、`num_workers > 0` を使う場合は、`DataLoader` に渡す前処理が pickle 可能である必要がある。
+
+たとえば次のような `lambda` は環境によって worker 起動時に失敗することがある。
+
+```python
+transforms.Lambda(lambda x: x.view(-1))
+```
+
+その場合は、トップレベル関数に切り出す。
+
+```python
+def flatten_tensor(x):
+    return x.view(-1)
+
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.5,), (0.5,)),
+    transforms.Lambda(flatten_tensor),
+])
+```
+
+さらに、学習処理全体は `if __name__ == "__main__":` の中から呼ぶ方がよい。
 
 ## 4. 転送時に non_blocking を使う
 
