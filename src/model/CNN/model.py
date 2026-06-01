@@ -16,6 +16,8 @@ class CNN(nn.Module):
             nn.Flatten(),
             nn.Linear(64 * 7 * 7, 128),
             nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
             nn.Linear(128, 10)
         )
     
