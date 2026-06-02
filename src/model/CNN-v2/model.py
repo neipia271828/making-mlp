@@ -14,10 +14,11 @@ class CNN(nn.Module):
         )
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(128 * 3 * 3, 256),
+            nn.Linear(128 * 3 * 3, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 10),
+            nn.Dropout(0.5),
+            nn.Linear(512, 10),
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
