@@ -3,9 +3,9 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ModelConstants:
-    NUM_EPOCHS: int = 30
+    NUM_EPOCHS: int = 60
     BATCHSIZE: int = 256
-    L_LATE: float = 3 * 1e-3
+    L_LATE: float = 3e-3
     WEIGHT_DECAY: float = 5e-5
     SCHEDULER_NAME: str = "CosineAnnealingLR"
     ETA_MIN: float = 1e-5
