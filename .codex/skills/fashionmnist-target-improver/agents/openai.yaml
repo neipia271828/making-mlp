@@ -1,0 +1,3 @@
+display_name: FashionMNIST Target Improver
+short_description: Recommend the next FashionMNIST runs from repo logs and TARGET.md.
+default_prompt: Analyze the making-mlp FashionMNIST logs against TARGET.md and recommend the next model improvements.
