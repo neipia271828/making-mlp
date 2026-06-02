@@ -6,7 +6,7 @@ class ModelConstants:
     NUM_EPOCHS: int = 100
     BATCHSIZE: int = 256
     L_LATE: float = 3 * 1e-4
-    WEIGHT_DECAY: float = 5e-5
+    WEIGHT_DECAY: float = 1e-5
 
 
 MODEL_CONSTANTS = ModelConstants()
