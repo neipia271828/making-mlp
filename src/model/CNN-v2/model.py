@@ -9,11 +9,15 @@ class CNN(nn.Module):
         self.features = nn.Sequential(
             ConvBlockVGG(1, 32),
             ConvBlockVGG(32, 64),
+            ConvBlockVGG(64, 128),
 
         )
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(64 * 7 * 7, 10)
+            nn.Linear(128 * 3 * 3, 256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, 10),
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
