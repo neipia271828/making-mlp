@@ -15,7 +15,6 @@ def build_transform(dataset_name: str, train: bool) -> transforms.Compose:
         transform_steps.extend(
             [
                 transforms.RandomHorizontalFlip(0.5),
-                transforms.RandomVerticalFlip(0.5),
                 transforms.RandomRotation(10),
                 transforms.RandomCrop(32, padding=4),
                 transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
