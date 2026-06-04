@@ -15,6 +15,7 @@ def build_transform(dataset_name: str, train: bool) -> transforms.Compose:
         transform_steps.extend(
             [
                 transforms.RandomHorizontalFlip(0.5),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
                 transforms.RandomCrop(32, padding=4),
                 transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
             ]
@@ -24,6 +25,7 @@ def build_transform(dataset_name: str, train: bool) -> transforms.Compose:
         [
             transforms.ToTensor(),
             transforms.Normalize(dataset_config.mean, dataset_config.std),
+            transforms.RandomErasing(p=0.5, scale=(0.02, 0.2)),
         ]
     )
 
