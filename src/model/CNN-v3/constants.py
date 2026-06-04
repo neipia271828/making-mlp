@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ModelConstants:
-    NUM_EPOCHS: int = 60
+    NUM_EPOCHS: int = 10
     BATCHSIZE: int = 256
     L_LATE: float = 3e-3
     WEIGHT_DECAY: float = 1e-4
