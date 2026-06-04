@@ -25,9 +25,11 @@ def build_transform(dataset_name: str, train: bool) -> transforms.Compose:
         [
             transforms.ToTensor(),
             transforms.Normalize(dataset_config.mean, dataset_config.std),
-            transforms.RandomErasing(p=0.5, scale=(0.02, 0.2)),
         ]
     )
+
+    if train:
+        transform_steps.append(transforms.RandomErasing(p=0.5, scale=(0.02, 0.2)))
 
     return transforms.Compose(transform_steps)
 
