@@ -10,10 +10,10 @@ from CONSTANTS import CONSTANTS
 
 from lib.factory import build_dataloaders, build_model, load_model_constants
 from lib.graph_drawer import graph_drawer
-from lib.device_getter import get_device
 from lib.log_maker import make_summalize_csv, make_train_log
 from lib.couting_time import Timer
 from lib.save_model import save_best_checkpoint, save_model
+from lib.predicator import pred, pred_double
 
 def _summarize_last_epochs(values: list[float], window: int = 10) -> tuple[float, float]:
     last_values = values[-window:] if len(values) >= window else values
@@ -28,9 +28,9 @@ def main() -> None:
 
     timer_0 = Timer()
     timer_0.start()
-    device = get_device()
+    device = meta_constants.DEVICE
     print(device)
-    use_cuda = device.type == "cuda"
+    use_cuda = meta_constants.USE_CUDA
 
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
 
@@ -80,8 +80,8 @@ def main() -> None:
 
             optimizer.zero_grad()
             logits = model(x_batch)
-            pred = logits.argmax(dim=1)
-            correct += (pred == y_batch).sum().item()
+            preds = logits.argmax(dim=1)
+            correct += (preds == y_batch).sum().item()
             loss = criterion(logits, y_batch)
             loss.backward()
             optimizer.step()
@@ -99,24 +99,13 @@ def main() -> None:
 
         model.eval()
 
-        with torch.no_grad():
+        if epoch + 1 == num_epochs:
+            valid_loss, valid_accuracy = pred_double(valid_loader, model, criterion)
+        else:
+            valid_loss, valid_accuracy = pred(valid_loader, model, criterion)
 
-            for x_batch, y_batch in valid_loader:
-                x_batch = x_batch.to(device, non_blocking=use_cuda)
-                y_batch = y_batch.to(device, non_blocking=use_cuda)
+        valid_losses.append(valid_loss)
 
-                logits = model(x_batch)
-                loss = criterion(logits, y_batch)
-                pred = logits.argmax(dim=1)
-                correct += (pred == y_batch).sum().item()
-                total += y_batch.size(0)
-
-                valid_loss += loss.item()
-
-            valid_loss /= len(valid_loader)
-            valid_losses.append(valid_loss)
-
-        valid_accuracy = correct / total
         valid_accuracies.append(valid_accuracy)
 
         if valid_loss < best_valid_loss and meta_constants.BACKUP_BOUNDARY < valid_accuracy:
@@ -185,16 +174,16 @@ def main() -> None:
             },
         )
 
-    if meta_constants.DRAW_TRAIN_GRAPH:
-        graph_drawer(
-            meta_constants.PROJECT,
-            epochs,
-            timestamp,
-            train_losses,
-            train_accuracies,
-            valid_losses,
-            valid_accuracies,
-        )
+    graph_drawer(
+        meta_constants.PROJECT,
+        epochs,
+        timestamp,
+        train_losses,
+        train_accuracies,
+        valid_losses,
+        valid_accuracies,
+        meta_constants.DRAW_TRAIN_GRAPH
+    )
 
 
 if __name__ == "__main__":

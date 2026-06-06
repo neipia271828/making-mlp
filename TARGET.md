@@ -1,1 +1,1 @@
-accuracy - >=95%
+accuracy >=95%
