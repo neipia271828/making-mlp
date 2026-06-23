@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Making MLP — Experiment Console</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Making MLP home">
+          <span class="brand-mark">M</span>
+          <span>
+            <strong>MAKING MLP</strong>
+            <small>EXPERIMENT CONSOLE</small>
+          </span>
+        </a>
+        <div class="topbar-actions">
+          <span class="connection"><i></i> LOCAL SESSION</span>
+          <button class="icon-button" id="refreshButton" type="button" title="再読み込み" aria-label="再読み込み">↻</button>
+        </div>
+      </header>
+
+      <aside class="sidebar">
+        <nav class="primary-nav" aria-label="Main navigation">
+          <button class="nav-item active" type="button" data-view="runs"><span>◫</span> Runs</button>
+          <button class="nav-item" type="button" data-view="config"><span>⌘</span> Constants</button>
+        </nav>
+
+        <div class="sidebar-section">
+          <label for="projectSelect">PROJECT</label>
+          <select id="projectSelect"></select>
+        </div>
+
+        <div class="sidebar-section run-section">
+          <div class="section-heading">
+            <span>EXPERIMENTS</span>
+            <strong id="runCount">0</strong>
+          </div>
+          <div class="run-list" id="runList" aria-live="polite"></div>
+        </div>
+
+        <div class="sidebar-footer">
+          <span>ACTIVE MODEL</span>
+          <strong id="activeModel">—</strong>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="view active" id="runsView">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">TRAINING LOG</p>
+              <h1 id="runTitle">実験を選択</h1>
+              <p id="runSubtitle">左の一覧からログを選択してください。</p>
+            </div>
+            <div class="run-status"><i></i> COMPLETED</div>
+          </div>
+
+          <div class="metric-grid">
+            <article class="metric-card accent">
+              <span>VALID ACCURACY</span>
+              <strong id="validAccuracy">—</strong>
+              <small id="accuracyDelta">LAST EPOCH</small>
+            </article>
+            <article class="metric-card">
+              <span>VALID LOSS</span>
+              <strong id="validLoss">—</strong>
+              <small>LAST EPOCH</small>
+            </article>
+            <article class="metric-card">
+              <span>EPOCH</span>
+              <strong id="epochCount">—</strong>
+              <small id="epochTarget">RECORDED</small>
+            </article>
+            <article class="metric-card">
+              <span>TIME / EPOCH</span>
+              <strong id="epochTime">—</strong>
+              <small>SECONDS</small>
+            </article>
+          </div>
+
+          <div class="chart-grid">
+            <article class="panel chart-panel">
+              <div class="panel-heading">
+                <div><span>ACCURACY</span><h2>Train / Validation</h2></div>
+                <div class="legend"><i class="train"></i>Train <i class="valid"></i>Valid</div>
+              </div>
+              <canvas id="accuracyChart" height="280"></canvas>
+            </article>
+            <article class="panel chart-panel">
+              <div class="panel-heading">
+                <div><span>LOSS</span><h2>Convergence</h2></div>
+                <div class="legend"><i class="train"></i>Train <i class="valid"></i>Valid</div>
+              </div>
+              <canvas id="lossChart" height="280"></canvas>
+            </article>
+          </div>
+
+          <article class="panel table-panel">
+            <div class="panel-heading">
+              <div><span>RAW LOG</span><h2>Epoch history</h2></div>
+              <button class="text-button" id="toggleGraphButton" type="button">Saved graph</button>
+            </div>
+            <div class="saved-graph" id="savedGraph" hidden>
+              <img id="savedGraphImage" alt="Saved training graph">
+            </div>
+            <div class="table-wrap" id="logTableWrap">
+              <table>
+                <thead><tr><th>Epoch</th><th>Time</th><th>Train loss</th><th>Train acc.</th><th>Valid loss</th><th>Valid acc.</th></tr></thead>
+                <tbody id="logTableBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="configView">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">EXPERIMENT SETUP</p>
+              <h1>Constants</h1>
+              <p>保存するとPython設定ファイルへ即時反映されます。学習実行中は変更しないでください。</p>
+            </div>
+            <span class="file-badge">src/CONSTANTS.py</span>
+          </div>
+
+          <article class="panel repo-panel">
+            <div class="repo-identity">
+              <span>REPOSITORY SYNC</span>
+              <h2><b id="repoBranch">—</b> <small id="repoCommit">—</small></h2>
+              <p id="repoSubject">Gitの状態を読み込んでいます。</p>
+            </div>
+            <div class="repo-stats">
+              <div><span>LOCAL CHANGES</span><strong id="repoChanges">—</strong></div>
+              <div><span>UPSTREAM</span><strong id="repoSync">—</strong></div>
+            </div>
+            <button class="pull-button" id="pullButton" type="button">
+              <span>↓</span>
+              Pull from GitHub
+            </button>
+          </article>
+          <pre class="git-output" id="gitOutput" hidden></pre>
+
+          <div class="config-grid">
+            <form class="panel config-panel" id="metaForm">
+              <div class="panel-heading">
+                <div><span>GLOBAL</span><h2>Meta constants</h2></div>
+                <button class="save-button" type="submit">Save global</button>
+              </div>
+              <div class="form-grid" id="metaFields"></div>
+            </form>
+
+            <form class="panel config-panel" id="modelForm">
+              <div class="panel-heading">
+                <div><span>MODEL</span><h2 id="modelConfigTitle">Model constants</h2></div>
+                <button class="save-button" type="submit">Save model</button>
+              </div>
+              <div class="model-picker">
+                <label for="modelConfigSelect">EDIT MODEL</label>
+                <select id="modelConfigSelect"></select>
+              </div>
+              <div class="form-grid" id="modelFields"></div>
+            </form>
+          </div>
+
+          <div class="safety-note">
+            <strong>WRITE SAFETY</strong>
+            <p>編集可能なフィールドだけを型検証して保存します。外部変更を検出した場合は保存せず、再読み込みを求めます。</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
