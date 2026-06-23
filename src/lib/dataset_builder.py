@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 
 import torch
@@ -21,13 +22,39 @@ DATASET_CONFIGS = {
     "MNIST": DatasetConfig("MNIST", "data", 10, 1, (28, 28), (0.5,), (0.5,)),
     "KMNIST": DatasetConfig("KMNIST", "data", 10, 1, (28, 28), (0.5,), (0.5,)),
     "CIFAR10": DatasetConfig("CIFAR10", "data", 10, 3, (32, 32), (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    "TinyImageNet": DatasetConfig(
+        "TinyImageNet", "data/tiny-imagenet-200", 200, 3, (64, 64),
+        (0.4802, 0.4481, 0.3975), (0.2770, 0.2691, 0.2821),
+    ),
 }
 
-DATASET_CLASSES = {
-    "FashionMNIST": datasets.FashionMNIST,
-    "MNIST": datasets.MNIST,
-    "KMNIST": datasets.KMNIST,
-    "CIFAR10": datasets.CIFAR10,
+
+def _build_torchvision(dataset_cls):
+    def builder(config: DatasetConfig, train: bool, transform):
+        return dataset_cls(
+            root=config.root,
+            train=train,
+            download=True,
+            transform=transform,
+        )
+    return builder
+
+
+def _build_imagefolder(config: DatasetConfig, train: bool, transform):
+    split = "train" if train else "val_organized"
+    return datasets.ImageFolder(
+        os.path.join(config.root, split),
+        transform=transform,
+    )
+
+
+# 「名前 → 作り方(builder)」の登録テーブル。新データセットはここに1行足すだけ。
+DATASET_BUILDERS = {
+    "FashionMNIST": _build_torchvision(datasets.FashionMNIST),
+    "MNIST": _build_torchvision(datasets.MNIST),
+    "KMNIST": _build_torchvision(datasets.KMNIST),
+    "CIFAR10": _build_torchvision(datasets.CIFAR10),
+    "TinyImageNet": _build_imagefolder,
 }
 
 
@@ -42,16 +69,11 @@ def build_dataset(dataset_name: str, train: bool, transform):
     dataset_config = get_dataset_config(dataset_name)
 
     try:
-        dataset_cls = DATASET_CLASSES[dataset_name]
+        builder = DATASET_BUILDERS[dataset_name]
     except KeyError as exc:
         raise ValueError(f"Unsupported dataset: {dataset_name}") from exc
 
-    return dataset_cls(
-        root=dataset_config.root,
-        train=train,
-        download=True,
-        transform=transform,
-    )
+    return builder(dataset_config, train, transform)
 
 
 def build_loader(dataset, batch_size: int, train: bool, device: torch.device) -> DataLoader:

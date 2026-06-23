@@ -1,6 +1,7 @@
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
+import inspect
 
 
 MODEL_ROOT = Path(__file__).resolve().parent.parent / "model"
@@ -13,7 +14,7 @@ def _load_module(model_name: str, module_name: str) -> ModuleType:
     return import_module(f"model.{model_name}.{module_name}")
 
 
-def build_model(model_name: str):
+def build_model(model_name: str, num_classes: int | None = None):
     model_module = _load_module(model_name, "model")
     candidate_names = [
         model_name,
@@ -29,6 +30,9 @@ def build_model(model_name: str):
 
     if model_class is None:
         raise AttributeError(f"Class {model_name} was not found in {model_name}/model.py")
+
+    if num_classes is not None and "num_classes" in inspect.signature(model_class).parameters:
+        return model_class(num_classes=num_classes)
     return model_class()
 
 

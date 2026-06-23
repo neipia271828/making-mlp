@@ -8,6 +8,7 @@ import torch.nn as nn
 from CONSTANTS import CONSTANTS
 
 from lib.factory import build_dataloaders, build_model, load_model_constants
+from lib.dataset_builder import get_dataset_config
 from lib.couting_time import Timer
 from lib.predicator import pred_dynamic
 
@@ -22,7 +23,8 @@ def main() -> None:
 
     _, valid_loader = build_dataloaders(meta_constants.MODEL, device)
 
-    model = build_model(meta_constants.MODEL).to(device)
+    num_classes = get_dataset_config(meta_constants.PROJECT).num_classes
+    model = build_model(meta_constants.MODEL, num_classes).to(device)
     state_dict = torch.load(
         "data/CIFAR10/models/2026-06-05-09-17/best_checkpoint.pt",
         weights_only=True,
