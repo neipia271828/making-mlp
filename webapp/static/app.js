@@ -6,6 +6,8 @@ const state = {
   runDetail: null,
   configModel: null,
   repository: null,
+  training: null,
+  controlTimer: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -40,6 +42,8 @@ function setView(name) {
   $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === name));
   $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}View`));
   if (name === "runs" && state.runDetail) requestAnimationFrame(drawCharts);
+  if (name === "control") startControlPolling();
+  else stopControlPolling();
 }
 
 function formatNumber(value, digits = 4) {
@@ -50,6 +54,25 @@ function formatNumber(value, digits = 4) {
 function formatPercent(value) {
   const number = Number(value);
   return Number.isFinite(number) ? `${(number * 100).toFixed(2)}%` : "—";
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  const total = Math.floor(seconds);
+  const h = String(Math.floor(total / 3600)).padStart(2, "0");
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+  const s = String(total % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
+function formatBytes(bytes) {
+  const number = Number(bytes);
+  if (!Number.isFinite(number)) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = number;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
 function fillSelect(select, values, selected) {
@@ -354,6 +377,158 @@ function drawLineChart(canvas, trainValues, validValues, fixedRange = null) {
   ctx.fillText(String(Math.max(trainValues.length, validValues.length)), width - pad.right, height - 12);
 }
 
+async function loadTrainingStatus() {
+  state.training = await api("/api/training/status");
+  renderTraining();
+}
+
+function renderTraining() {
+  const data = state.training;
+  if (!data) return;
+  const running = data.running;
+  const pill = $("#trainingPill");
+  pill.classList.toggle("is-running", running);
+  pill.classList.toggle("is-failed", !running && Number(data.returncode) > 0);
+  $("#trainingPillText").textContent = running ? "RUNNING" : data.finished_at ? "FINISHED" : "IDLE";
+  $("#trainingState").textContent = running ? "RUNNING" : data.finished_at ? "STOPPED" : "IDLE";
+  $("#trainingPid").textContent = data.pid ? `PID ${data.pid}` : "NO PROCESS";
+  const elapsedBase = running ? Date.now() / 1000 : data.finished_at;
+  $("#trainingElapsed").textContent =
+    data.started_at && elapsedBase ? formatDuration(elapsedBase - data.started_at) : "—";
+  $("#trainingExit").textContent = data.returncode === null || data.returncode === undefined ? "—" : data.returncode;
+  $("#trainingExitNote").textContent = Number(data.returncode) > 0 ? "FAILED" : "LAST RUN";
+  $("#trainingLines").textContent = data.line_count ?? "—";
+  const log = $("#trainingLog");
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
+  log.textContent = data.log || "（出力はまだありません）";
+  if (atBottom) log.scrollTop = log.scrollHeight;
+  $("#startTrainingButton").disabled = running;
+  $("#stopTrainingButton").disabled = !running;
+}
+
+async function startTraining() {
+  const button = $("#startTrainingButton");
+  button.disabled = true;
+  try {
+    state.training = await api("/api/training/start", { method: "POST" });
+    renderTraining();
+    showToast("学習を開始しました。");
+  } catch (error) {
+    showToast(error.message, true);
+    button.disabled = false;
+  }
+}
+
+async function stopTraining() {
+  const button = $("#stopTrainingButton");
+  if (!window.confirm("実行中の学習を停止しますか？")) return;
+  button.disabled = true;
+  try {
+    state.training = await api("/api/training/stop", { method: "POST" });
+    renderTraining();
+    showToast("学習を停止しました。");
+  } catch (error) {
+    showToast(error.message, true);
+    button.disabled = false;
+  }
+}
+
+async function loadResources() {
+  const data = await api("/api/resources");
+  const load = data.load || [];
+  $("#cpuLoad").textContent = Number.isFinite(Number(load[0])) ? Number(load[0]).toFixed(2) : "—";
+  $("#cpuCount").textContent = data.cpu_count ? `${data.cpu_count} CORES` : "— CORES";
+  $("#loadAvg").textContent = load.length >= 3 ? `${Number(load[1]).toFixed(2)} / ${Number(load[2]).toFixed(2)}` : "—";
+  if (data.memory) {
+    $("#memPercent").textContent = `${data.memory.percent}%`;
+    $("#memDetail").textContent = `${formatBytes(data.memory.used)} / ${formatBytes(data.memory.total)}`;
+  } else {
+    $("#memPercent").textContent = "—";
+    $("#memDetail").textContent = "UNAVAILABLE";
+  }
+  const gpus = data.gpus || [];
+  $("#gpuCount").textContent = String(gpus.length);
+  $("#gpuList").replaceChildren(...gpus.map((gpu) => {
+    const card = document.createElement("article");
+    card.className = "gpu-card";
+    const memPct = gpu.mem_total ? (gpu.mem_used / gpu.mem_total) * 100 : 0;
+    card.innerHTML =
+      `<div class="gpu-top"><strong>#${gpu.index} ${escapeHtml(gpu.name)}</strong><span>${gpu.temp}°C</span></div>` +
+      `<div class="gpu-bars">` +
+      `<label>UTIL <b>${gpu.util}%</b></label><div class="bar"><i style="width:${Math.min(100, gpu.util)}%"></i></div>` +
+      `<label>VRAM <b>${formatBytes(gpu.mem_used * 1024 * 1024)} / ${formatBytes(gpu.mem_total * 1024 * 1024)}</b></label>` +
+      `<div class="bar"><i style="width:${Math.min(100, memPct)}%"></i></div>` +
+      `</div>`;
+    return card;
+  }));
+  if (!gpus.length) {
+    $("#gpuList").innerHTML = '<p class="empty-list">GPUが検出されませんでした（nvidia-smi 不在）。</p>';
+  }
+  $("#resourceUpdated").textContent = new Date().toLocaleTimeString();
+}
+
+async function refreshControl() {
+  try {
+    await Promise.all([loadTrainingStatus(), loadResources()]);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function startControlPolling() {
+  stopControlPolling();
+  refreshControl();
+  state.controlTimer = setInterval(refreshControl, 3000);
+}
+
+function stopControlPolling() {
+  if (state.controlTimer) {
+    clearInterval(state.controlTimer);
+    state.controlTimer = null;
+  }
+}
+
+async function restartApp({ pullFirst = false } = {}) {
+  const message = pullFirst
+    ? "GitHubから取得してWebアプリを再起動します。よろしいですか？"
+    : "Webアプリを再起動します。よろしいですか？";
+  if (!window.confirm(message)) return;
+  if (state.training && state.training.running &&
+      !window.confirm("学習が実行中です。再起動するとモニタリングが切れます（学習自体は継続します）。続けますか？")) {
+    return;
+  }
+  const output = $("#gitOutput");
+  output.hidden = false;
+  try {
+    if (pullFirst) {
+      output.textContent = "git pull --ff-only を実行しています…";
+      const result = await api("/api/repository/pull", { method: "POST" });
+      output.textContent = result.message;
+    }
+    output.textContent += "\nWebアプリを再起動しています…";
+    await api("/api/app/restart", { method: "POST" });
+    await waitForRestart();
+  } catch (error) {
+    output.textContent = error.message;
+    showToast("再起動に失敗しました。", true);
+  }
+}
+
+async function waitForRestart() {
+  showToast("再起動中… 自動的に再接続します。");
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      await api("/api/health");
+      window.location.reload();
+      return;
+    } catch (_error) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  showToast("再起動を確認できませんでした。手動で再読み込みしてください。", true);
+}
+
 function bindEvents() {
   $$(".nav-item").forEach((item) => item.addEventListener("click", () => setView(item.dataset.view)));
   $("#projectSelect").addEventListener("change", async (event) => {
@@ -380,6 +555,10 @@ function bindEvents() {
     } catch (error) { handleError(error); }
   });
   $("#pullButton").addEventListener("click", pullRepository);
+  $("#startTrainingButton").addEventListener("click", startTraining);
+  $("#stopTrainingButton").addEventListener("click", stopTraining);
+  $("#pullRestartButton").addEventListener("click", () => restartApp({ pullFirst: true }));
+  $("#restartButton").addEventListener("click", () => restartApp({ pullFirst: false }));
   $("#toggleGraphButton").addEventListener("click", () => {
     const graph = $("#savedGraph");
     graph.hidden = !graph.hidden;

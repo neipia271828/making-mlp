@@ -25,6 +25,7 @@
       <aside class="sidebar">
         <nav class="primary-nav" aria-label="Main navigation">
           <button class="nav-item active" type="button" data-view="runs"><span>◫</span> Runs</button>
+          <button class="nav-item" type="button" data-view="control"><span>▶</span> Control</button>
           <button class="nav-item" type="button" data-view="config"><span>⌘</span> Constants</button>
         </nav>
 
@@ -115,6 +116,64 @@
           </article>
         </section>
 
+        <section class="view" id="controlView">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">RUNTIME CONTROL</p>
+              <h1>Training &amp; Resources</h1>
+              <p>src/CONSTANTS.py の現在の設定で学習を起動・停止し、進捗とマシンのリソースを監視します。</p>
+            </div>
+            <div class="run-status" id="trainingPill"><i></i> <span id="trainingPillText">IDLE</span></div>
+          </div>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div><span>TRAINING</span><h2>src/train.py</h2></div>
+              <div class="control-actions">
+                <button class="save-button" id="startTrainingButton" type="button">▶ Start training</button>
+                <button class="pull-button danger-button" id="stopTrainingButton" type="button">■ Stop</button>
+              </div>
+            </div>
+            <div class="metric-grid control-metrics">
+              <article class="metric-card accent">
+                <span>STATUS</span><strong id="trainingState">—</strong><small id="trainingPid">NO PROCESS</small>
+              </article>
+              <article class="metric-card">
+                <span>ELAPSED</span><strong id="trainingElapsed">—</strong><small>HH:MM:SS</small>
+              </article>
+              <article class="metric-card">
+                <span>EXIT CODE</span><strong id="trainingExit">—</strong><small id="trainingExitNote">LAST RUN</small>
+              </article>
+              <article class="metric-card">
+                <span>LOG LINES</span><strong id="trainingLines">—</strong><small>CAPTURED</small>
+              </article>
+            </div>
+            <pre class="git-output console-log" id="trainingLog">学習はまだ開始されていません。</pre>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div><span>MACHINE</span><h2>Resource monitor</h2></div>
+              <span class="file-badge" id="resourceUpdated">—</span>
+            </div>
+            <div class="metric-grid">
+              <article class="metric-card">
+                <span>CPU LOAD (1m)</span><strong id="cpuLoad">—</strong><small id="cpuCount">— CORES</small>
+              </article>
+              <article class="metric-card">
+                <span>MEMORY</span><strong id="memPercent">—</strong><small id="memDetail">USED / TOTAL</small>
+              </article>
+              <article class="metric-card">
+                <span>GPU COUNT</span><strong id="gpuCount">—</strong><small>DETECTED</small>
+              </article>
+              <article class="metric-card">
+                <span>LOAD 5m / 15m</span><strong id="loadAvg">—</strong><small>AVERAGE</small>
+              </article>
+            </div>
+            <div class="gpu-list" id="gpuList"></div>
+          </article>
+        </section>
+
         <section class="view" id="configView">
           <div class="page-heading">
             <div>
@@ -135,10 +194,20 @@
               <div><span>LOCAL CHANGES</span><strong id="repoChanges">—</strong></div>
               <div><span>UPSTREAM</span><strong id="repoSync">—</strong></div>
             </div>
-            <button class="pull-button" id="pullButton" type="button">
-              <span>↓</span>
-              Pull from GitHub
-            </button>
+            <div class="repo-actions">
+              <button class="pull-button" id="pullButton" type="button">
+                <span>↓</span>
+                Pull from GitHub
+              </button>
+              <button class="pull-button" id="pullRestartButton" type="button">
+                <span>⟳</span>
+                Pull &amp; restart app
+              </button>
+              <button class="pull-button danger-button" id="restartButton" type="button">
+                <span>⏻</span>
+                Restart app
+              </button>
+            </div>
           </article>
           <pre class="git-output" id="gitOutput" hidden></pre>
 

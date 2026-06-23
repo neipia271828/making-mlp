@@ -10,8 +10,11 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import threading
+import time
+from collections import deque
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -238,12 +241,188 @@ def _require_safe_name(value: str, label: str) -> str:
     return value
 
 
+class TrainingManager:
+    """src/train.py を子プロセスとして起動・停止し、標準出力を保持する。"""
+
+    MAX_LINES = 4000
+    TAIL_LINES = 600
+
+    def __init__(self, repo_root: Path) -> None:
+        self.repo_root = repo_root
+        self._lock = threading.Lock()
+        self._process: subprocess.Popen[str] | None = None
+        self._reader: threading.Thread | None = None
+        self._lines: deque[str] = deque(maxlen=self.MAX_LINES)
+        self._started_at: float | None = None
+        self._finished_at: float | None = None
+        self._returncode: int | None = None
+
+    def _is_running(self) -> bool:
+        return self._process is not None and self._process.poll() is None
+
+    def start(self) -> dict[str, object]:
+        with self._lock:
+            if self._is_running():
+                raise ApiError(HTTPStatus.CONFLICT, "学習はすでに実行中です。")
+            script = self.repo_root / "src" / "train.py"
+            if not script.exists():
+                raise ApiError(HTTPStatus.NOT_FOUND, "src/train.py が見つかりません。")
+            env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+            try:
+                process = subprocess.Popen(
+                    [sys.executable, "src/train.py"],
+                    cwd=str(self.repo_root),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    text=True,
+                    bufsize=1,
+                    env=env,
+                )
+            except OSError as error:
+                raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, f"学習を起動できません: {error}") from None
+            self._process = process
+            self._lines.clear()
+            self._started_at = time.time()
+            self._finished_at = None
+            self._returncode = None
+            self._reader = threading.Thread(target=self._consume, args=(process,), daemon=True)
+            self._reader.start()
+            return self._status_locked()
+
+    def _consume(self, process: subprocess.Popen[str]) -> None:
+        if process.stdout is not None:
+            for line in process.stdout:
+                self._lines.append(line.rstrip("\n"))
+        process.wait()
+        with self._lock:
+            if self._process is process:
+                self._finished_at = time.time()
+                self._returncode = process.returncode
+
+    def stop(self) -> dict[str, object]:
+        with self._lock:
+            if not self._is_running():
+                raise ApiError(HTTPStatus.CONFLICT, "実行中の学習はありません。")
+            process = self._process
+        assert process is not None
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        with self._lock:
+            return self._status_locked()
+
+    def status(self) -> dict[str, object]:
+        with self._lock:
+            return self._status_locked()
+
+    def _status_locked(self) -> dict[str, object]:
+        return {
+            "running": self._is_running(),
+            "pid": self._process.pid if self._process else None,
+            "started_at": self._started_at,
+            "finished_at": self._finished_at,
+            "returncode": self._returncode,
+            "log": "\n".join(list(self._lines)[-self.TAIL_LINES:]),
+            "line_count": len(self._lines),
+        }
+
+
+def _read_gpus() -> list[dict[str, object]]:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return []
+    if result.returncode != 0:
+        return []
+    gpus: list[dict[str, object]] = []
+    for line in result.stdout.strip().splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 6:
+            continue
+        try:
+            gpus.append(
+                {
+                    "index": int(parts[0]),
+                    "name": parts[1],
+                    "util": float(parts[2]),
+                    "mem_used": float(parts[3]),
+                    "mem_total": float(parts[4]),
+                    "temp": float(parts[5]),
+                }
+            )
+        except ValueError:
+            continue
+    return gpus
+
+
+def _read_memory() -> dict[str, object] | None:
+    meminfo = Path("/proc/meminfo")
+    if not meminfo.exists():
+        return None
+    info: dict[str, int] = {}
+    for line in meminfo.read_text(encoding="utf-8").splitlines():
+        key, _, rest = line.partition(":")
+        fields = rest.strip().split()
+        if fields and fields[0].isdigit():
+            info[key] = int(fields[0])  # kB
+    total = info.get("MemTotal", 0)
+    available = info.get("MemAvailable", info.get("MemFree", 0))
+    if not total:
+        return None
+    used = total - available
+    return {
+        "total": total * 1024,
+        "used": used * 1024,
+        "percent": round(used / total * 100, 1),
+    }
+
+
+def read_resources() -> dict[str, object]:
+    try:
+        load = list(os.getloadavg())
+    except (OSError, AttributeError):
+        load = None
+    return {
+        "cpu_count": os.cpu_count(),
+        "load": load,
+        "memory": _read_memory(),
+        "gpus": _read_gpus(),
+    }
+
+
+def schedule_restart(delay: float = 0.4) -> None:
+    """レスポンス送出後に、同じ引数で自プロセスを再起動する。"""
+
+    def _restart() -> None:
+        os.chdir(REPO_ROOT)
+        os.execv(sys.executable, [sys.executable, "-m", "webapp", *sys.argv[1:]])
+
+    threading.Timer(delay, _restart).start()
+
+
 class AppState:
     def __init__(self, repo_root: Path = REPO_ROOT) -> None:
         self.repo_root = repo_root.resolve()
         self.static_root = STATIC_ROOT.resolve()
         self.write_lock = threading.Lock()
         self.git_lock = threading.Lock()
+        self.training = TrainingManager(self.repo_root)
+
+    def resources(self) -> dict[str, object]:
+        return read_resources()
 
     @property
     def model_root(self) -> Path:
@@ -547,6 +726,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/repository":
                 self._send_json(self.state.repository_status())
+            elif parsed.path == "/api/training/status":
+                self._send_json(self.state.training.status())
+            elif parsed.path == "/api/resources":
+                self._send_json(self.state.resources())
             elif parsed.path == "/api/graph":
                 self._send_file(
                     self.state.graph_path(
@@ -576,6 +759,17 @@ class AppHandler(BaseHTTPRequestHandler):
             self._require_same_origin()
             if parsed.path == "/api/repository/pull":
                 self._send_json(self.state.pull_repository())
+                return
+            if parsed.path == "/api/training/start":
+                self._send_json(self.state.training.start())
+                return
+            if parsed.path == "/api/training/stop":
+                self._send_json(self.state.training.stop())
+                return
+            if parsed.path == "/api/app/restart":
+                self._send_json({"restarting": True})
+                self.wfile.flush()
+                schedule_restart()
                 return
             if parsed.path != "/api/config":
                 raise ApiError(HTTPStatus.NOT_FOUND, "Not found")
