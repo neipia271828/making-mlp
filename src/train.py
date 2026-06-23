@@ -38,7 +38,7 @@ def main() -> None:
 
     model = build_model(meta_constants.MODEL).to(device)
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = optim.Adam(
         model.parameters(),
         lr=learning_rate,
