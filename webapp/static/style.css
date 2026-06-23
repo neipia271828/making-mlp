@@ -213,6 +213,18 @@ tbody tr:hover { background: var(--cyan-soft); }
 .run-status.is-running { color: var(--cyan); border-color: var(--cyan); }
 .run-status.is-failed i { background: var(--danger); box-shadow: 0 0 10px var(--danger); }
 .run-status.is-failed { color: var(--danger); border-color: var(--danger); }
+.core-section { padding: 4px 18px 6px; }
+.core-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+.core-head span { color: var(--cyan); font: 650 8px/1 ui-monospace, monospace; letter-spacing: .16em; }
+.core-head strong { font: 600 16px/1 ui-monospace, monospace; }
+.core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; padding-bottom: 14px; }
+.core-cell { padding: 8px 10px; border: 1px solid var(--line); background: var(--panel-2); }
+.core-cell-head { display: flex; justify-content: space-between; margin-bottom: 6px; color: var(--muted); font: 600 9px/1 ui-monospace, monospace; }
+.core-cell-head b { color: var(--text); }
+.core-cell .bar { height: 6px; border: 1px solid var(--line); background: #070a0e; overflow: hidden; }
+.core-cell .bar i { display: block; width: 0; height: 100%; background: var(--cyan); transition: width .3s ease; }
+.core-cell .bar i.is-high { background: var(--amber); }
+
 .gpu-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; padding: 0 18px 18px; }
 .gpu-card { padding: 14px; border: 1px solid var(--line); background: var(--panel-2); }
 .gpu-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; }
@@ -221,7 +233,17 @@ tbody tr:hover { background: var(--cyan-soft); }
 .gpu-bars label { display: flex; justify-content: space-between; margin: 10px 0 5px; color: var(--muted); font: 600 9px/1 ui-monospace, monospace; letter-spacing: .08em; }
 .gpu-bars label b { color: var(--text); }
 .gpu-bars .bar { height: 7px; border: 1px solid var(--line); background: #070a0e; overflow: hidden; }
-.gpu-bars .bar i { display: block; height: 100%; background: var(--cyan); transition: width .3s ease; }
+.gpu-bars .bar i { display: block; width: 0; height: 100%; background: var(--cyan); transition: width .3s ease; }
+.gpu-bars .bar i.is-high { background: var(--amber); }
+.gpu-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.gpu-stat { padding: 8px 10px; border: 1px solid var(--line); background: #0c1117; }
+.gpu-stat span { display: block; margin-bottom: 5px; color: var(--muted); font: 650 8px/1 ui-monospace, monospace; letter-spacing: .1em; }
+.gpu-stat strong { font: 600 13px/1 ui-monospace, monospace; }
+.gpu-procs { margin-top: 12px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.gpu-proc { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: baseline; padding: 4px 0; color: #aab5bf; font: 10px/1.4 ui-monospace, monospace; }
+.gpu-proc .gpu-proc-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gpu-proc b { color: var(--cyan); }
+.gpu-proc-empty { margin: 0; color: var(--muted); font: 10px/1.4 ui-monospace, monospace; }
 .repo-actions { display: flex; flex-direction: column; gap: 8px; }
 
 .toast { position: fixed; z-index: 30; right: 22px; bottom: 22px; max-width: 380px; padding: 13px 16px; border: 1px solid var(--cyan); background: #0d1717; color: var(--text); font-size: 12px; transform: translateY(30px); opacity: 0; pointer-events: none; transition: .2s ease; }

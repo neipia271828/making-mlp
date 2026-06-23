@@ -433,12 +433,77 @@ async function stopTraining() {
   }
 }
 
+function makeBar(label, valueText, percent) {
+  const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+  const fragment = document.createDocumentFragment();
+  const labelEl = document.createElement("label");
+  const valueEl = document.createElement("b");
+  valueEl.textContent = valueText;
+  labelEl.append(`${label} `, valueEl);
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  const fill = document.createElement("i");
+  fill.style.width = `${clamped}%`;            // CSSOM経由なのでCSPで許可される
+  if (clamped >= 90) fill.classList.add("is-high");
+  bar.append(fill);
+  fragment.append(labelEl, bar);
+  return fragment;
+}
+
+function makeStat(label, value) {
+  const wrap = document.createElement("div");
+  wrap.className = "gpu-stat";
+  wrap.append(
+    Object.assign(document.createElement("span"), { textContent: label }),
+    Object.assign(document.createElement("strong"), { textContent: value })
+  );
+  return wrap;
+}
+
+function shortenProcessName(name) {
+  const text = String(name || "");
+  const base = text.split("/").pop() || text;
+  return base.length > 24 ? `${base.slice(0, 23)}…` : base;
+}
+
+function makeCoreCell(index, percent) {
+  const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+  const cell = document.createElement("div");
+  cell.className = "core-cell";
+  const head = document.createElement("div");
+  head.className = "core-cell-head";
+  head.append(
+    Object.assign(document.createElement("span"), { textContent: `C${index}` }),
+    Object.assign(document.createElement("b"), { textContent: `${clamped}%` })
+  );
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  const fill = document.createElement("i");
+  fill.style.width = `${clamped}%`;
+  if (clamped >= 90) fill.classList.add("is-high");
+  bar.append(fill);
+  cell.append(head, bar);
+  return cell;
+}
+
 async function loadResources() {
   const data = await api("/api/resources");
   const load = data.load || [];
   $("#cpuLoad").textContent = Number.isFinite(Number(load[0])) ? Number(load[0]).toFixed(2) : "—";
   $("#cpuCount").textContent = data.cpu_count ? `${data.cpu_count} CORES` : "— CORES";
   $("#loadAvg").textContent = load.length >= 3 ? `${Number(load[1]).toFixed(2)} / ${Number(load[2]).toFixed(2)}` : "—";
+  const cores = data.cpu_cores || [];
+  $("#cpuOverall").textContent = Number.isFinite(Number(data.cpu_percent)) ? `${data.cpu_percent}%` : "—";
+  if (!cores.length) {
+    $("#coreGrid").replaceChildren(
+      Object.assign(document.createElement("p"), {
+        className: "empty-list",
+        textContent: "コア別使用率は取得できません（/proc/stat 不在）。",
+      })
+    );
+  } else {
+    $("#coreGrid").replaceChildren(...cores.map((pct, index) => makeCoreCell(index, pct)));
+  }
   if (data.memory) {
     $("#memPercent").textContent = `${data.memory.percent}%`;
     $("#memDetail").textContent = `${formatBytes(data.memory.used)} / ${formatBytes(data.memory.total)}`;
@@ -448,21 +513,85 @@ async function loadResources() {
   }
   const gpus = data.gpus || [];
   $("#gpuCount").textContent = String(gpus.length);
-  $("#gpuList").replaceChildren(...gpus.map((gpu) => {
-    const card = document.createElement("article");
-    card.className = "gpu-card";
-    const memPct = gpu.mem_total ? (gpu.mem_used / gpu.mem_total) * 100 : 0;
-    card.innerHTML =
-      `<div class="gpu-top"><strong>#${gpu.index} ${escapeHtml(gpu.name)}</strong><span>${gpu.temp}°C</span></div>` +
-      `<div class="gpu-bars">` +
-      `<label>UTIL <b>${gpu.util}%</b></label><div class="bar"><i style="width:${Math.min(100, gpu.util)}%"></i></div>` +
-      `<label>VRAM <b>${formatBytes(gpu.mem_used * 1024 * 1024)} / ${formatBytes(gpu.mem_total * 1024 * 1024)}</b></label>` +
-      `<div class="bar"><i style="width:${Math.min(100, memPct)}%"></i></div>` +
-      `</div>`;
-    return card;
-  }));
   if (!gpus.length) {
-    $("#gpuList").innerHTML = '<p class="empty-list">GPUが検出されませんでした（nvidia-smi 不在）。</p>';
+    $("#gpuList").replaceChildren(
+      Object.assign(document.createElement("p"), {
+        className: "empty-list",
+        textContent: "GPUが検出されませんでした（nvidia-smi 不在）。",
+      })
+    );
+  } else {
+    $("#gpuList").replaceChildren(...gpus.map((gpu) => {
+      const card = document.createElement("article");
+      card.className = "gpu-card";
+      const memPct = gpu.mem_total ? (gpu.mem_used / gpu.mem_total) * 100 : 0;
+
+      const top = document.createElement("div");
+      top.className = "gpu-top";
+      const name = document.createElement("strong");
+      name.textContent = `#${gpu.index} ${gpu.name}`;
+      const temp = document.createElement("span");
+      temp.textContent = `${gpu.temp}°C`;
+      top.append(name, temp);
+
+      const bars = document.createElement("div");
+      bars.className = "gpu-bars";
+      bars.append(
+        makeBar("UTIL", gpu.util != null ? `${gpu.util}%` : "N/A", gpu.util || 0),
+        makeBar(
+          "VRAM",
+          `${formatBytes(gpu.mem_used * 1024 * 1024)} / ${formatBytes(gpu.mem_total * 1024 * 1024)}`,
+          memPct
+        )
+      );
+      if (gpu.power_limit) {
+        bars.append(
+          makeBar(
+            "POWER",
+            `${gpu.power_draw != null ? gpu.power_draw.toFixed(0) : "?"} / ${gpu.power_limit.toFixed(0)} W`,
+            (Number(gpu.power_draw) / gpu.power_limit) * 100
+          )
+        );
+      }
+
+      const stats = document.createElement("div");
+      stats.className = "gpu-stats";
+      stats.append(
+        makeStat("FAN", gpu.fan != null ? `${gpu.fan}%` : "—"),
+        makeStat("SM CLOCK", gpu.clock_sm != null ? `${gpu.clock_sm} MHz` : "—")
+      );
+
+      const procs = document.createElement("div");
+      procs.className = "gpu-procs";
+      const procList = gpu.processes || [];
+      if (!procList.length) {
+        procs.append(
+          Object.assign(document.createElement("p"), {
+            className: "gpu-proc-empty",
+            textContent: "使用中プロセスなし",
+          })
+        );
+      } else {
+        procs.append(...procList.map((proc) => {
+          const row = document.createElement("div");
+          row.className = "gpu-proc";
+          row.append(
+            Object.assign(document.createElement("span"), { textContent: `PID ${proc.pid}` }),
+            Object.assign(document.createElement("span"), {
+              className: "gpu-proc-name",
+              textContent: shortenProcessName(proc.name),
+            }),
+            Object.assign(document.createElement("b"), {
+              textContent: proc.mem != null ? formatBytes(proc.mem * 1024 * 1024) : "—",
+            })
+          );
+          return row;
+        }));
+      }
+
+      card.append(top, bars, stats, procs);
+      return card;
+    }));
   }
   $("#resourceUpdated").textContent = new Date().toLocaleTimeString();
 }

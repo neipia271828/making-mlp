@@ -330,14 +330,23 @@ class TrainingManager:
         }
 
 
+def _to_float(text: str) -> float | None:
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+GPU_QUERY_FIELDS = (
+    "index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,"
+    "power.draw,power.limit,fan.speed,clocks.sm,uuid"
+)
+
+
 def _read_gpus() -> list[dict[str, object]]:
     try:
         result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu",
-                "--format=csv,noheader,nounits",
-            ],
+            ["nvidia-smi", f"--query-gpu={GPU_QUERY_FIELDS}", "--format=csv,noheader,nounits"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -348,24 +357,109 @@ def _read_gpus() -> list[dict[str, object]]:
     if result.returncode != 0:
         return []
     gpus: list[dict[str, object]] = []
+    by_uuid: dict[str, dict[str, object]] = {}
     for line in result.stdout.strip().splitlines():
         parts = [part.strip() for part in line.split(",")]
-        if len(parts) < 6:
+        if len(parts) < 11:
             continue
         try:
-            gpus.append(
-                {
-                    "index": int(parts[0]),
-                    "name": parts[1],
-                    "util": float(parts[2]),
-                    "mem_used": float(parts[3]),
-                    "mem_total": float(parts[4]),
-                    "temp": float(parts[5]),
-                }
-            )
+            index = int(parts[0])
         except ValueError:
             continue
+        gpu: dict[str, object] = {
+            "index": index,
+            "name": parts[1],
+            "util": _to_float(parts[2]),
+            "mem_used": _to_float(parts[3]),
+            "mem_total": _to_float(parts[4]),
+            "temp": _to_float(parts[5]),
+            "power_draw": _to_float(parts[6]),
+            "power_limit": _to_float(parts[7]),
+            "fan": _to_float(parts[8]),
+            "clock_sm": _to_float(parts[9]),
+            "processes": [],
+        }
+        gpus.append(gpu)
+        by_uuid[parts[10]] = gpu
+    _attach_gpu_processes(by_uuid)
     return gpus
+
+
+def _attach_gpu_processes(by_uuid: dict[str, dict[str, object]]) -> None:
+    if not by_uuid:
+        return
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-compute-apps=gpu_uuid,pid,process_name,used_memory",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return
+    if result.returncode != 0:
+        return
+    for line in result.stdout.strip().splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 4:
+            continue
+        gpu = by_uuid.get(parts[0])
+        if gpu is None:
+            continue
+        processes = gpu["processes"]
+        assert isinstance(processes, list)
+        processes.append({"pid": parts[1], "name": parts[2], "mem": _to_float(parts[3])})
+
+
+def _read_cpu_times() -> dict[str, tuple[int, int]]:
+    """/proc/stat から {cpu名: (idle, total)} を返す（cpu=全体, cpu0.. =コア別）。"""
+    stat = Path("/proc/stat")
+    if not stat.exists():
+        return {}
+    times: dict[str, tuple[int, int]] = {}
+    for line in stat.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("cpu"):
+            continue
+        parts = line.split()
+        try:
+            values = [int(field) for field in parts[1:]]
+        except ValueError:
+            continue
+        if len(values) < 4:
+            continue
+        idle = values[3] + (values[4] if len(values) > 4 else 0)  # idle + iowait
+        times[parts[0]] = (idle, sum(values))
+    return times
+
+
+def _read_cpu_usage(interval: float = 0.15) -> tuple[float | None, list[float]]:
+    """2回サンプリングして全体使用率とコア別使用率(%)を返す。"""
+    first = _read_cpu_times()
+    if not first:
+        return None, []
+    time.sleep(interval)
+    second = _read_cpu_times()
+
+    def percent(name: str) -> float:
+        idle1, total1 = first[name]
+        idle2, total2 = second.get(name, (idle1, total1))
+        total_delta = total2 - total1
+        if total_delta <= 0:
+            return 0.0
+        busy = (total_delta - (idle2 - idle1)) / total_delta * 100
+        return round(max(0.0, min(100.0, busy)), 1)
+
+    overall = percent("cpu") if "cpu" in first and "cpu" in second else None
+    core_names = sorted(
+        (name for name in first if name != "cpu" and name in second),
+        key=lambda name: int(name[3:]) if name[3:].isdigit() else 0,
+    )
+    return overall, [percent(name) for name in core_names]
 
 
 def _read_memory() -> dict[str, object] | None:
@@ -395,9 +489,12 @@ def read_resources() -> dict[str, object]:
         load = list(os.getloadavg())
     except (OSError, AttributeError):
         load = None
+    cpu_overall, cpu_cores = _read_cpu_usage()
     return {
         "cpu_count": os.cpu_count(),
         "load": load,
+        "cpu_percent": cpu_overall,
+        "cpu_cores": cpu_cores,
         "memory": _read_memory(),
         "gpus": _read_gpus(),
     }
