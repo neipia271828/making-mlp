@@ -14,6 +14,12 @@ Constants画面では、現在のGitブランチとローカル変更数を確�
 
 ブラウザで <http://127.0.0.1:8765> を開く。
 
+起動時には、GPUサーバーへ接続するためのSSHトンネルコマンドと手順も表示される。手順だけをもう一度確認する場合は次を使う。
+
+```bash
+./mlp-web tunnel
+```
+
 ポートを変更する場合は、CLIオプションを渡す。
 
 ```bash
@@ -42,6 +48,16 @@ ssh -L 8765:127.0.0.1:8765 student222@kamiyama-server
 ```
 
 接続中にMacのブラウザで <http://127.0.0.1:8765> を開く。
+
+SSH接続先を変更する場合は、起動時または `tunnel` サブコマンドへ指定する。
+
+```bash
+./mlp-web tunnel \
+  --ssh-host 172.16.51.202 \
+  --ssh-port 2222 \
+  --ssh-user student222 \
+  --ssh-key ~/.ssh/id_ed25519_kmc_gpu
+```
 
 ## 注意
 

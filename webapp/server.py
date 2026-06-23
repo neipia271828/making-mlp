@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -41,6 +42,10 @@ SUMMARY_ALIASES = {
     "model": "MODEL",
     "epochs": "NUM_EPOCHS",
 }
+DEFAULT_SSH_HOST = "172.16.51.202"
+DEFAULT_SSH_PORT = 2222
+DEFAULT_SSH_USER = "student222"
+DEFAULT_SSH_KEY = "~/.ssh/id_ed25519_kmc_gpu"
 
 
 class ApiError(Exception):
@@ -642,15 +647,97 @@ def create_server(host: str, port: int, repo_root: Path = REPO_ROOT) -> Threadin
     return server
 
 
+def format_tunnel_guide(
+    remote_port: int,
+    local_port: int,
+    ssh_host: str,
+    ssh_port: int,
+    ssh_user: str,
+    ssh_key: str,
+) -> str:
+    destination = shlex.quote(f"{ssh_user}@{ssh_host}")
+    key_argument = (
+        ssh_key
+        if re.fullmatch(r"[A-Za-z0-9_./~+-]+", ssh_key)
+        else shlex.quote(ssh_key)
+    )
+    command = " ".join(
+        [
+            "ssh",
+            "-p",
+            str(ssh_port),
+            "-N",
+            "-L",
+            shlex.quote(f"{local_port}:127.0.0.1:{remote_port}"),
+            "-i",
+            key_argument,
+            destination,
+        ]
+    )
+    return "\n".join(
+        [
+            "",
+            "=== MacからGPUサーバーへ接続する方法 ===",
+            "1. このGPUサーバー側のターミナルは、アプリを起動したままにします。",
+            "2. Macで別のターミナルを開き、次を実行します。",
+            "",
+            f"   {command}",
+            "",
+            "3. SSHコマンドを実行したターミナルも開いたままにします。",
+            "4. Macのブラウザで次を開きます。",
+            "",
+            f"   http://127.0.0.1:{local_port}",
+            "",
+            "終了するときは、アプリ側とSSHトンネル側で Ctrl+C を押します。",
+        ]
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Making MLP experiment log viewer")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("serve", "tunnel"),
+        default="serve",
+        help="serve: Webアプリを起動 / tunnel: SSHトンネル手順だけを表示",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--local-port", type=int, default=None)
+    parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST)
+    parser.add_argument("--ssh-port", type=int, default=DEFAULT_SSH_PORT)
+    parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER)
+    parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY)
     args = parser.parse_args()
+
+    if args.command == "tunnel":
+        print(
+            format_tunnel_guide(
+                remote_port=args.port,
+                local_port=args.local_port or args.port,
+                ssh_host=args.ssh_host,
+                ssh_port=args.ssh_port,
+                ssh_user=args.ssh_user,
+                ssh_key=args.ssh_key,
+            )
+        )
+        return
+
     server = create_server(args.host, args.port)
     print(f"Making MLP web app: http://{args.host}:{server.server_port}")
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         print("WARNING: This server has no authentication. Prefer SSH port forwarding.")
+    print(
+        format_tunnel_guide(
+            remote_port=server.server_port,
+            local_port=args.local_port or server.server_port,
+            ssh_host=args.ssh_host,
+            ssh_port=args.ssh_port,
+            ssh_user=args.ssh_user,
+            ssh_key=args.ssh_key,
+        )
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

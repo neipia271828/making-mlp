@@ -21,6 +21,24 @@ class CliTestCase(unittest.TestCase):
         self.assertIn("Making MLP experiment log viewer", result.stdout)
         self.assertIn("--host", result.stdout)
         self.assertIn("--port", result.stdout)
+        self.assertIn("tunnel", result.stdout)
+
+    def test_tunnel_command_prints_complete_guide(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [repo_root / "mlp-web", "tunnel"],
+            cwd="/tmp",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("MacからGPUサーバーへ接続する方法", result.stdout)
+        self.assertIn(
+            "ssh -p 2222 -N -L 8765:127.0.0.1:8765 -i ~/.ssh/id_ed25519_kmc_gpu student222@172.16.51.202",
+            result.stdout,
+        )
+        self.assertIn("http://127.0.0.1:8765", result.stdout)
 
     def test_cli_starts_health_endpoint(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
