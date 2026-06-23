@@ -3,7 +3,7 @@ from lib.device_getter import get_device
 @dataclass(frozen=True)
 class MetaConstants:
     PROJECT: str = "CIFAR10"
-    MODEL: str = "CNN-v4"
+    MODEL: str = "ResNet-v0"
     WRITE_TRAIN_LOG: bool = True
     WRITE_SUMMARY_LOG: bool = True
     DRAW_TRAIN_GRAPH: bool = False

@@ -30,7 +30,7 @@ class ResNet(nn.Module):
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
         self.classifier = nn.Linear(512 * BasicBlock.expansion, num_classes)
 
-        self._initialize_weight()
+        self._initialize_weights()
 
     def _make_layer(
         self,
