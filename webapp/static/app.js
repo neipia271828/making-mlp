@@ -391,7 +391,9 @@ function renderTraining() {
   pill.classList.toggle("is-failed", !running && Number(data.returncode) > 0);
   $("#trainingPillText").textContent = running ? "RUNNING" : data.finished_at ? "FINISHED" : "IDLE";
   $("#trainingState").textContent = running ? "RUNNING" : data.finished_at ? "STOPPED" : "IDLE";
-  $("#trainingPid").textContent = data.pid ? `PID ${data.pid}` : "NO PROCESS";
+  $("#trainingPid").textContent = data.pid
+    ? `PID ${data.pid}${data.reattached ? " · 再接続" : ""}`
+    : "NO PROCESS";
   const elapsedBase = running ? Date.now() / 1000 : data.finished_at;
   $("#trainingElapsed").textContent =
     data.started_at && elapsedBase ? formatDuration(elapsedBase - data.started_at) : "—";

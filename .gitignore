@@ -24,3 +24,6 @@ data/
 
 # OS files
 .DS_Store
+
+# webapp runtime (training log/state)
+.webapp/

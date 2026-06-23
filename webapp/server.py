@@ -9,12 +9,12 @@ import mimetypes
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -241,24 +241,78 @@ def _require_safe_name(value: str, label: str) -> str:
     return value
 
 
-class TrainingManager:
-    """src/train.py を子プロセスとして起動・停止し、標準出力を保持する。"""
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
-    MAX_LINES = 4000
+
+def _read_log(path: Path, max_lines: int) -> tuple[str, int]:
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as file:
+            lines = file.readlines()
+    except OSError:
+        return "", 0
+    tail = "".join(lines[-max_lines:]).rstrip("\n")
+    return tail, len(lines)
+
+
+class TrainingManager:
+    """src/train.py を別セッションの子プロセスとして起動し、ログをファイルへ書き出す。
+
+    標準出力をパイプではなくファイルへ流すため、webapp を再起動しても学習は
+    巻き込まれない。状態（PID・ログパス）をファイルに保存し、起動時に PID が
+    生存していれば監視を自動的に再接続する。
+    """
+
     TAIL_LINES = 600
 
     def __init__(self, repo_root: Path) -> None:
         self.repo_root = repo_root
+        self._run_dir = repo_root / ".webapp"
+        self._log_path = self._run_dir / "training.log"
+        self._state_path = self._run_dir / "training.json"
         self._lock = threading.Lock()
         self._process: subprocess.Popen[str] | None = None
-        self._reader: threading.Thread | None = None
-        self._lines: deque[str] = deque(maxlen=self.MAX_LINES)
+        self._pid: int | None = None
         self._started_at: float | None = None
         self._finished_at: float | None = None
         self._returncode: int | None = None
+        self._load_state()
+
+    def _load_state(self) -> None:
+        try:
+            data = json.loads(self._state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        self._pid = data.get("pid")
+        self._started_at = data.get("started_at")
+        self._finished_at = data.get("finished_at")
+        self._returncode = data.get("returncode")
+
+    def _persist_locked(self) -> None:
+        payload = {
+            "pid": self._pid,
+            "started_at": self._started_at,
+            "finished_at": self._finished_at,
+            "returncode": self._returncode,
+        }
+        try:
+            self._run_dir.mkdir(parents=True, exist_ok=True)
+            self._state_path.write_text(json.dumps(payload), encoding="utf-8")
+        except OSError:
+            pass
 
     def _is_running(self) -> bool:
-        return self._process is not None and self._process.poll() is None
+        if self._process is not None:
+            return self._process.poll() is None
+        if self._pid is not None:
+            return _pid_alive(self._pid)
+        return False
 
     def start(self) -> dict[str, object]:
         with self._lock:
@@ -267,66 +321,97 @@ class TrainingManager:
             script = self.repo_root / "src" / "train.py"
             if not script.exists():
                 raise ApiError(HTTPStatus.NOT_FOUND, "src/train.py が見つかりません。")
+            self._run_dir.mkdir(parents=True, exist_ok=True)
             env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+            try:
+                log_file = self._log_path.open("w", encoding="utf-8")
+            except OSError as error:
+                raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, f"ログを作成できません: {error}") from None
             try:
                 process = subprocess.Popen(
                     [sys.executable, "src/train.py"],
                     cwd=str(self.repo_root),
-                    stdout=subprocess.PIPE,
+                    stdout=log_file,
                     stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL,
-                    text=True,
-                    bufsize=1,
                     env=env,
+                    start_new_session=True,
                 )
             except OSError as error:
+                log_file.close()
                 raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, f"学習を起動できません: {error}") from None
+            log_file.close()  # 子プロセスが自身の fd を保持するので親は閉じてよい
             self._process = process
-            self._lines.clear()
+            self._pid = process.pid
             self._started_at = time.time()
             self._finished_at = None
             self._returncode = None
-            self._reader = threading.Thread(target=self._consume, args=(process,), daemon=True)
-            self._reader.start()
+            self._persist_locked()
+            threading.Thread(target=self._watch, args=(process,), daemon=True).start()
             return self._status_locked()
 
-    def _consume(self, process: subprocess.Popen[str]) -> None:
-        if process.stdout is not None:
-            for line in process.stdout:
-                self._lines.append(line.rstrip("\n"))
+    def _watch(self, process: subprocess.Popen[str]) -> None:
         process.wait()
         with self._lock:
             if self._process is process:
                 self._finished_at = time.time()
                 self._returncode = process.returncode
+                self._persist_locked()
 
     def stop(self) -> dict[str, object]:
         with self._lock:
             if not self._is_running():
                 raise ApiError(HTTPStatus.CONFLICT, "実行中の学習はありません。")
+            pid = self._pid
             process = self._process
-        assert process is not None
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        assert pid is not None
+        self._signal_group(pid, signal.SIGTERM)
+        deadline = time.time() + 10
+        while time.time() < deadline and _pid_alive(pid):
+            time.sleep(0.3)
+        if _pid_alive(pid):
+            self._signal_group(pid, signal.SIGKILL)
+        if process is not None:
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
         with self._lock:
+            if self._finished_at is None:
+                self._finished_at = time.time()
+            self._persist_locked()
             return self._status_locked()
+
+    @staticmethod
+    def _signal_group(pid: int, sig: int) -> None:
+        # start_new_session=True によりプロセスグループごと停止できる（DataLoader worker も含む）
+        try:
+            os.killpg(os.getpgid(pid), sig)
+        except (ProcessLookupError, PermissionError):
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
 
     def status(self) -> dict[str, object]:
         with self._lock:
             return self._status_locked()
 
     def _status_locked(self) -> dict[str, object]:
+        running = self._is_running()
+        if not running and self._started_at and self._finished_at is None:
+            self._finished_at = time.time()
+            self._persist_locked()
+        log_text, line_count = _read_log(self._log_path, self.TAIL_LINES)
         return {
-            "running": self._is_running(),
-            "pid": self._process.pid if self._process else None,
+            "running": running,
+            "pid": self._pid,
             "started_at": self._started_at,
             "finished_at": self._finished_at,
             "returncode": self._returncode,
-            "log": "\n".join(list(self._lines)[-self.TAIL_LINES:]),
-            "line_count": len(self._lines),
+            "reattached": running and self._process is None,
+            "log": log_text,
+            "line_count": line_count,
         }
 
 
