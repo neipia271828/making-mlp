@@ -14,7 +14,7 @@ from lib.log_maker import make_summalize_csv, make_train_log
 from lib.couting_time import Timer
 from lib.save_model import save_best_checkpoint, save_model
 from lib.predicator import pred, pred_double
-from lib.dataset_builder import get_dataset_config
+from lib.dataset_builder import get_dataset_config, ensure_dataset
 
 def _summarize_last_epochs(values: list[float], window: int = 10) -> tuple[float, float]:
     last_values = values[-window:] if len(values) >= window else values
@@ -35,6 +35,7 @@ def main() -> None:
 
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
 
+    ensure_dataset(meta_constants.PROJECT)
     train_loader, valid_loader = build_dataloaders(meta_constants.MODEL, device)
 
     num_classes = get_dataset_config(meta_constants.PROJECT).num_classes

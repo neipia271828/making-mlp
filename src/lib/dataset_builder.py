@@ -1,4 +1,7 @@
 import os
+import shutil
+import urllib.request
+import zipfile
 from dataclasses import dataclass
 
 import torch
@@ -100,3 +103,56 @@ def build_dataloaders(
         build_loader(train_ds, batch_size, train=True, device=device),
         build_loader(valid_ds, batch_size, train=False, device=device),
     )
+
+
+TINY_IMAGENET_URL = "http://cs231n.stanford.edu/tiny-imagenet-200.zip"
+
+
+def _prepare_tiny_imagenet(config: DatasetConfig) -> None:
+    """Tiny-ImageNet を DL・展開し、val を ImageFolder 形式へ再配置する（冪等）。"""
+    root = config.root                          # data/tiny-imagenet-200
+    data_dir = os.path.dirname(root) or "."     # data
+    train_dir = os.path.join(root, "train")
+    val_organized = os.path.join(root, "val_organized")
+
+    if os.path.isdir(train_dir) and os.path.isdir(val_organized):
+        return  # 既に準備済み
+
+    os.makedirs(data_dir, exist_ok=True)
+
+    if not os.path.isdir(root):
+        zip_path = os.path.join(data_dir, "tiny-imagenet-200.zip")
+        if not os.path.exists(zip_path):
+            print("downloading tiny-imagenet-200.zip ...")
+            urllib.request.urlretrieve(TINY_IMAGENET_URL, zip_path)
+        print("extracting ...")
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(data_dir)
+
+    if not os.path.isdir(val_organized):
+        val_dir = os.path.join(root, "val")
+        ann = os.path.join(val_dir, "val_annotations.txt")
+        with open(ann) as f:
+            mapping = {line.split("\t")[0]: line.split("\t")[1] for line in f}
+        for fname, wnid in mapping.items():
+            cls_dir = os.path.join(val_organized, wnid)
+            os.makedirs(cls_dir, exist_ok=True)
+            shutil.copy(
+                os.path.join(val_dir, "images", fname),
+                os.path.join(cls_dir, fname),
+            )
+        print(f"reorganized {len(mapping)} val images into {val_organized}")
+
+
+# 「名前 → 準備処理」の登録テーブル。torchvision 系は download=True が担うので未登録。
+DATASET_PREPARERS = {
+    "TinyImageNet": _prepare_tiny_imagenet,
+}
+
+
+def ensure_dataset(dataset_name: str) -> None:
+    """学習前にデータが無ければ取得・整形する。準備不要なデータセットでは何もしない。"""
+    config = get_dataset_config(dataset_name)
+    preparer = DATASET_PREPARERS.get(dataset_name)
+    if preparer is not None:
+        preparer(config)
